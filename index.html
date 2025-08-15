@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Schedule Planner</title>
+<link rel="icon" type="image/png" href="icon.png">
+<style>
+  :root{
+    --bg:#0f1724; --card:#0b1220; --glass: rgba(255,255,255,0.06);
+    --accent: linear-gradient(90deg,#7c3aed,#06b6d4);
+    --glass-border: rgba(255,255,255,0.12);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;color:#e6eef8;background:radial-gradient(1000px 500px at 10% 10%, rgba(3,7,18,0.6), transparent), var(--bg);-webkit-font-smoothing:antialiased}
+
+  .app{display:grid;grid-template-columns:360px 1fr;gap:20px;padding:22px;min-height:100vh}
+  @media(max-width:900px){.app{grid-template-columns:1fr;padding:14px}}
+
+  .panel{background:var(--glass);border-radius:16px;padding:18px;box-shadow:0 8px 30px rgba(2,6,23,0.6);border:1px solid var(--glass-border);backdrop-filter:blur(20px) saturate(180%)}
+  h1{font-size:18px;margin:0 0 8px}
+  p.lead{margin:0;font-size:13px;color:rgba(255,255,255,0.6)}
+
+  form.row{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .field{display:flex;gap:8px;align-items:center}
+  .field input[type=text]{flex:1;padding:10px;border-radius:10px;border:none;background:var(--glass);color:inherit;outline:none}
+
+  .row-two{display:flex;gap:8px}
+  .row-two input[type=time]{flex:1;padding:8px;border-radius:10px;border:none;background:var(--glass);color:inherit}
+  .color-chooser{width:52px;height:40px;border-radius:10px;border:none;padding:0;background:linear-gradient(135deg,#fff2,#0002)}
+
+  .btn{padding:10px 12px;border-radius:12px;border:none;background:var(--accent);color:white;font-weight:600;cursor:pointer;box-shadow:0 6px 20px rgba(34,197,94,0.07);transition:transform .12s ease}
+  .btn:active{transform:translateY(1px)}
+
+  .tasks{margin-top:16px;display:flex;flex-direction:column;gap:10px;max-height:58vh;overflow:auto;padding-right:6px}
+  .task{display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:var(--glass);border:1px solid var(--glass-border);touch-action:none;backdrop-filter:blur(12px) saturate(180%)}
+  .task .meta{flex:1;display:flex;justify-content:space-between;align-items:center}
+  .task .title{font-weight:700}
+  .task .time{font-size:12px;color:white}
+  .task .delete-btn{margin-left:10px;padding:4px 8px;border:none;border-radius:8px;background:rgba(255,0,0,0.7);color:white;cursor:pointer;font-size:10px}
+
+  .timeline-wrap{border-radius:16px;padding:18px;border:1px solid var(--glass-border);background:var(--glass);backdrop-filter:blur(20px) saturate(180%)}
+  .timeline-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .timeline-view{position:relative;height:96vh;border-radius:12px;overflow:auto;padding:18px;background:var(--glass);backdrop-filter:blur(15px) saturate(180%)}
+
+  .hours{position:absolute;left:18px;top:18px;bottom:18px;width:60px}
+  .hour{height:40px;display:flex;align-items:center;font-size:12px;color:rgba(255,255,255,0.6)}
+  .tracks{margin-left:76px;position:relative;padding-right:12px}
+
+  .timeline-task{position:absolute;left:0;right:8px;padding:10px;border-radius:12px;color:white;font-weight:700;box-shadow:0 8px 26px rgba(2,6,23,0.6);display:flex;justify-content:space-between;align-items:center;background:var(--glass);backdrop-filter:blur(12px) saturate(180%)}
+  .timeline-task .time{color:white;font-weight:500}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="panel">
+    <h1>Create Task</h1>
+    <form id="task-form" class="row" onsubmit="return false;">
+      <div class="field"><input id="title" type="text" placeholder="Task title" required /></div>
+      <div class="row-two">
+        <input id="start" type="time" required />
+        <input id="end" type="time" required />
+        <input id="color" class="color-chooser" type="color" value="#8b5cf6" />
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="addBtn" class="btn">Add task</button>
+      </div>
+    </form>
+    <br>
+    <div class="panel">
+      <h1>Task List</h1>
+      <div class="tasks" id="taskList"></div>
+    </div>
+  </div>
+  <div class="timeline-wrap">
+    <div class="timeline-header">
+      <div><strong>Timeline</strong></div>
+      <button id="toggleGrid" class="btn" style="padding:8px 10px">Toggle 24h</button>
+    </div>
+    <div class="timeline-view" id="timelineView">
+      <div class="hours" id="hoursColumn"></div>
+      <div class="tracks" id="tracks"></div>
+    </div>
+  </div>
+</div>
+<script>
+const STORAGE_KEY = 'daily_schedule_tasks_v1';
+let tasks = [];
+let is24h = true;
+
+function saveLocal(){localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));}
+function loadLocal(){tasks = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); renderAll();}
+
+function parseTime(t){let [h,m]=t.split(':').map(Number);return h*60+m;}
+function formatTime(m){let hh = Math.floor(m/60), mm = m%60; if(!is24h){let ampm = hh>=12?'PM':'AM'; hh = hh%12 || 12; return `${hh}:${String(mm).padStart(2,'0')} ${ampm}`;} return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;}
+
+function renderAll(){renderList();renderTimeline();saveLocal();}
+
+function renderList(){
+  const list=document.getElementById('taskList');
+  list.innerHTML='';
+  tasks.forEach((t,i)=>{
+    const el=document.createElement('div');el.className='task';el.dataset.id=t.id;
+    const chip=document.createElement('div');chip.style.background=t.color;chip.style.width='8px';chip.style.borderRadius='4px';
+    const meta=document.createElement('div');meta.className='meta';meta.innerHTML=`<div class='title'>${t.title}</div><div class='time'>${t.start} → ${t.end}</div>`;
+    const delBtn=document.createElement('button');delBtn.className='delete-btn';delBtn.textContent='Delete';
+    delBtn.onclick=()=>{tasks.splice(i,1); renderAll();};
+    el.append(chip,meta,delBtn);
+    list.appendChild(el);
+  });
+}
+
+function renderTimeline(){const hours=document.getElementById('hoursColumn');const tracks=document.getElementById('tracks');hours.innerHTML='';tracks.innerHTML='';
+for(let h=0;h<24;h++){hours.innerHTML+=`<div class='hour'>${formatTime(h*60)}</div>`;}
+const sorted=[...tasks].sort((a,b)=>parseTime(a.start)-parseTime(b.start));
+sorted.forEach(t=>{
+  const startM=parseTime(t.start), endM=parseTime(t.end);
+  const top=(startM/60)*40, height=((endM-startM)/60)*40;
+  const el=document.createElement('div');el.className='timeline-task';
+  const title=document.createElement('div');title.textContent=t.title;
+  const time=document.createElement('div');time.className='time';time.textContent=`${t.start} → ${t.end}`;
+  el.style.top=top+'px';el.style.height=height+'px';el.style.background=t.color;el.append(title,time);tracks.appendChild(el);
+});}
+
+document.getElementById('addBtn').onclick=()=>{
+  const title=document.getElementById('title').value.trim();
+  const start=document.getElementById('start').value;
+  const end=document.getElementById('end').value;
+  const color=document.getElementById('color').value;
+  if(!title||!start||!end)return;
+  tasks.push({id:Date.now(),title,color,start,end});
+  renderAll();document.getElementById('task-form').reset();
+};
+
+document.getElementById('toggleGrid').onclick=()=>{is24h=!is24h;renderTimeline();};
+
+loadLocal();
+</script>
+</body>
+</html>
